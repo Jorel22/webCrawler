@@ -1,15 +1,18 @@
 import requests
 import re
+import os
+from pymongo import MongoClient
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class Crawler:
-    def __init__(self, url):
+    def __init__(self, url, db_uri, db_name):
         self.url = url
         self.titles = []
         self.points = []
         self.comments = []
+        self.usage_collection = MongoClient(db_uri)[db_name]["usage"]
 
     def clean_title(self, title):
         re_str = r"\n(\d+\.) "
@@ -19,15 +22,9 @@ class Crawler:
         re_points_str = r"\n(\d+)"
         re_comments_str = r"(\d+)\xa0comments \n$"
         search_points = re.search(re_points_str, data)
-        if search_points is None:
-            points = 0
-        else:
-            points = int(search_points.group(1))
         search_comments = re.search(re_comments_str, data)
-        if search_comments is None:
-            comments = 0
-        else:
-            comments = int(search_comments.group(1))
+        points = 0 if search_points is None else int(search_points.group(1))
+        comments = 0 if search_comments is None else int(search_comments.group(1))
         return points, comments
 
     def get_raw_data(self):
@@ -46,7 +43,7 @@ class Crawler:
                     self.titles.append(self.clean_title(texto))
             except AttributeError:
                 pass
-        return 0
+        return None
 
     def print_data(self):
         print("Printing method")
@@ -68,18 +65,21 @@ class Crawler:
 
         filtered = []
         usage = {}
+        if filter_id == 1:
+            condition_fun = lambda clean_title: len(clean_title.split()) > 5
+            sorting_key = lambda x: x["comments"]
+            applied_filter = "More"
+        elif filter_id == 2:
+            condition_fun = lambda clean_title: len(clean_title.split()) <= 5
+            sorting_key = lambda x: x["points"]
+            applied_filter = "Less"
+        else:
+            print("Invalid filter_id")
+            return [], {}
+
         for i in range(len(self.comments)):
-            clean_title = self.titles[i].replace("+", "")
-            if filter_id == 1:
-                condition = len(clean_title.split()) > 5
-                sorting_key = lambda x: x["comments"]
-                applied_filter = "More"
-            elif filter_id == 2:
-                condition = len(clean_title.split()) <= 5
-                sorting_key = lambda x: x["points"]
-                applied_filter = "Less"
-            clean_title = self.titles[i].replace("+", "")
-            if condition:
+            clean_title = re.sub(r"[^a-zA-Z0-9\s]", "", self.titles[i])
+            if condition_fun(clean_title):
                 filtered.append(
                     {
                         "title": self.titles[i],
@@ -88,7 +88,7 @@ class Crawler:
                     }
                 )
         usage = {
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
             "filter": applied_filter,
             "count": len(filtered),
         }
@@ -96,10 +96,20 @@ class Crawler:
         ordered = sorted(filtered, key=sorting_key, reverse=True)
         return ordered, usage
 
+    def save_in_db(self, usage):
+        inserted_obj = self.usage_collection.insert_one(usage)
+        return inserted_obj.inserted_id
 
-URL = "https://news.ycombinator.com"
-crawler = Crawler(URL)
-crawler.get_raw_data()
-filtered_entries, usage = crawler.filter(1)
-print("Entries: ", filtered_entries)
-print("Usage: ", usage)
+
+if __name__ == "__main__":
+    url = "https://news.ycombinator.com"
+    db_uri = os.getenv("DB_URI", "")
+    db_name = os.getenv("DB_NAME", "test")
+
+    crawler = Crawler(url, db_uri, db_name)
+    crawler.get_raw_data()
+    filtered_entries, usage = crawler.filter(1)
+    print("Entries: ", filtered_entries)
+    print("Usage: ", usage)
+    inserted_id = crawler.save_in_db(usage)
+    print("Inserted id: ", inserted_id)
