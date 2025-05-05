@@ -1,6 +1,7 @@
-import requests
-import re
 import os
+import sys
+import re
+import requests
 from pymongo import MongoClient
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone
@@ -12,19 +13,27 @@ class Crawler:
         self.titles = []
         self.points = []
         self.comments = []
-        self.usage_collection = MongoClient(db_uri)[db_name]["usage"]
+        try:
+            self.usage_collection = MongoClient(db_uri)[db_name]["usage"]
+        except Exception as e:
+            print("Error in init: ", e)
+            sys.exit(1)
 
     def clean_title(self, title):
         re_str = r"\n(\d+\.) "
         return re.sub(re_str, "", title.rsplit(" (", 1)[0])
 
     def clean_data(self, data):
-        re_points_str = r"\n(\d+)"
-        re_comments_str = r"(\d+)\xa0comments \n$"
-        search_points = re.search(re_points_str, data)
-        search_comments = re.search(re_comments_str, data)
-        points = 0 if search_points is None else int(search_points.group(1))
-        comments = 0 if search_comments is None else int(search_comments.group(1))
+        try:
+            re_points_str = r"\n(\d+)"
+            re_comments_str = r"(\d+)\xa0comments \n$"
+            search_points = re.search(re_points_str, data)
+            search_comments = re.search(re_comments_str, data)
+            points = 0 if search_points is None else int(search_points.group(1))
+            comments = 0 if search_comments is None else int(search_comments.group(1))
+        except Exception as e:
+            print("Error in clean_data: ", str(e))
+            return 0, 0
         return points, comments
 
     def get_raw_data(self):
@@ -77,27 +86,35 @@ class Crawler:
             print("Invalid filter_id")
             return [], {}
 
-        for i in range(len(self.comments)):
-            clean_title = re.sub(r"[^a-zA-Z0-9\s]", "", self.titles[i])
-            if condition_fun(clean_title):
-                filtered.append(
-                    {
-                        "title": self.titles[i],
-                        "points": self.points[i],
-                        "comments": self.comments[i],
-                    }
-                )
-        usage = {
-            "timestamp": datetime.now(timezone.utc),
-            "filter": applied_filter,
-            "count": len(filtered),
-        }
+        try:
+            for i in range(len(self.comments)):
+                clean_title = re.sub(r"[^a-zA-Z0-9\s]", "", self.titles[i])
+                if condition_fun(clean_title):
+                    filtered.append(
+                        {
+                            "title": self.titles[i],
+                            "points": self.points[i],
+                            "comments": self.comments[i],
+                        }
+                    )
+            usage = {
+                "timestamp": datetime.now(timezone.utc),
+                "filter": applied_filter,
+                "count": len(filtered),
+            }
 
-        ordered = sorted(filtered, key=sorting_key, reverse=True)
+            ordered = sorted(filtered, key=sorting_key, reverse=True)
+        except Exception as e:
+            print("Error in filter: ", str(e))
+            return [], {}
         return ordered, usage
 
     def save_in_db(self, usage):
-        inserted_obj = self.usage_collection.insert_one(usage)
+        try:
+            inserted_obj = self.usage_collection.insert_one(usage)
+        except Exception as e:
+            print("Error in save_in_db: ", str(e))
+            return ""
         return inserted_obj.inserted_id
 
 
@@ -106,9 +123,10 @@ if __name__ == "__main__":
     db_uri = os.getenv("DB_URI", "")
     db_name = os.getenv("DB_NAME", "test")
 
+    filter_id = int(sys.argv[1])
     crawler = Crawler(url, db_uri, db_name)
     crawler.get_raw_data()
-    filtered_entries, usage = crawler.filter(1)
+    filtered_entries, usage = crawler.filter(filter_id)
     print("Entries: ", filtered_entries)
     print("Usage: ", usage)
     inserted_id = crawler.save_in_db(usage)
