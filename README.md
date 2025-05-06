@@ -24,4 +24,4 @@ The function to clean the subtitles of entries is testet using Pytest. The tests
 
 ### Results
 As show in image ![Example of result](result_example.jpg)
-The entries with the filter applied are printed first. Then the usage document is shown and finally after the document have been stored in db it shows the id of the document.
+The entries with the filter applied are printed first. Then the usage document is shown and finally after the usage document have been stored in db it shows the id of the document.
