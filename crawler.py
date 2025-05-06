@@ -16,46 +16,51 @@ class Crawler:
         try:
             self.usage_collection = MongoClient(db_uri)[db_name]["usage"]
         except Exception as e:
-            print("Error in init: ", e)
+            print("Error connecting to db: ", e)
             sys.exit(1)
 
     def clean_title(self, title):
         re_str = r"\n(\d+\.) "
         return re.sub(re_str, "", title.rsplit(" (", 1)[0])
 
-    def clean_data(self, data):
+    def get_points_comments_from_subtitle(self, subtitle):
         try:
-            re_points_str = r"\n(\d+)"
-            re_comments_str = r"(\d+)\xa0comments \n$"
-            search_points = re.search(re_points_str, data)
-            search_comments = re.search(re_comments_str, data)
+            re_points_str = r"\n(\d+) point"
+            re_comments_str = r"(\d+)\xa0comment[s]? \n$"
+            search_points = re.search(re_points_str, subtitle)
+            search_comments = re.search(re_comments_str, subtitle)
             points = 0 if search_points is None else int(search_points.group(1))
             comments = 0 if search_comments is None else int(search_comments.group(1))
         except Exception as e:
-            print("Error in clean_data: ", str(e))
+            print("Error in clean_subtitle: ", str(e))
             return 0, 0
         return points, comments
 
     def get_raw_data(self):
-        r = requests.get(self.url)
-        soup = BeautifulSoup(r.content, "html.parser")
+        try:
+            r = requests.get(self.url)
+            soup = BeautifulSoup(r.content, "html.parser")
+        except Exception as e:
+            print("Error in get_raw_data: ", str(e))
+            return None
         for child in soup.find_all("table")[2].contents:
             try:
-                texto = child.get_text()
-                if not texto:
+                data_text = child.get_text()
+                if not data_text:
                     continue
-                if "hide" in texto:
-                    point, comment = self.clean_data(texto)
+                if (
+                    "hide" in data_text
+                ):  # depending if "hide" is present in the text, it is a title or a subtitle
+                    point, comment = self.get_points_comments_from_subtitle(data_text)
                     self.points.append(point)
                     self.comments.append(comment)
                 else:
-                    self.titles.append(self.clean_title(texto))
-            except AttributeError:
+                    self.titles.append(self.clean_title(data_text))
+            except AttributeError:  # a simple way to check if the child is a tag or not
                 pass
         return None
 
     def print_data(self):
-        print("Printing method")
         print("len_titles: ", len(self.titles))
         print(self.titles)
         print("-------")
